@@ -1,43 +1,48 @@
+
 "use client"
 
 import type React from "react"
 import * as FileSystem from 'expo-file-system';
 import { useState, useEffect } from "react"
-import { Download, Search, Music, Pause, Play, Trash, Youtube } from "lucide-react"
-import { Button } from "~/components/ui/button"
-import { Input } from "~/components/ui/input"
-import { Progress } from "~/components/ui/progress"
-import { ScrollArea } from "@radix-ui/react-scroll-area"
-import { Separator } from "~/components/ui/separator"
-import { GestureResponderEvent, Platform, TextInput } from "react-native";
-import { ActivityIndicator } from "react-native";
-
+import Feather from '@expo/vector-icons/Feather';
+import { Separator } from "@/components/separator";
+import { GestureResponderEvent, Platform, StyleSheet, TextInput, View, Text, ImageBackground, Dimensions, Pressable, Image } from "react-native";
+import { ActivityIndicator, ScrollView } from "react-native";
+import { Audio, AVPlaybackStatus } from 'expo-av';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 
 interface download {
+    url: string,
   id: string;
   title: string;
   artist: string;
   thumbnail: string;
-  progress: number;
-  downloaded: boolean;
+  load: boolean;
+  play: boolean;
   duration: string;
+    downloaded: boolean;
 }
 const API=["https://youtune-backend.flyra.tech/download/music-info?url=", "https://youtune-backend.flyra.tech/download/music?url="];
 // const API=["http://localhost:3000/download/music-info?url=", "http://localhost:3000/download/music?url="];
 export default function Home() {
-  const [firstRender, setFirstRender] = useState(true);
-  const [load, setLoad] = useState(false);
-  const [url, setUrl] = useState("")
-  const [newDownload, setNewDownload] = useState<download>({
-    id: "",
-    title: "",
-    artist: "",
-    thumbnail: "",
-    progress: 0,
-    downloaded: false,
-    duration: "",
-  });
+    const { height } = Dimensions.get('window');
+    const [firstRender, setFirstRender] = useState(true);
+    const [sound, setSound] = useState<Audio.Sound | null>(null);
+    const [load, setLoad] = useState(false);
+    const [url, setUrl] = useState("")
+    const [newDownload, setNewDownload] = useState<download>({
+        url: "",
+        id: "",
+        title: "",
+        artist: "",
+        thumbnail: "",
+        load: false,
+        play: false,
+        duration: "",
+        downloaded: false,
+    });
   const [downloads, setDownloads] = useState<download[]>([])
 
   const handleSubmit = async (e: GestureResponderEvent) => {
@@ -51,13 +56,15 @@ export default function Home() {
             
       if(dados){
         setNewDownload({
+        url: encodeURIComponent(url),
         id: downloads.length.toString(),
         title: dados.title,
         artist: dados.artist,
         thumbnail: dados.thumbnail,
-        progress: 0,
-        downloaded: false,
+        load: false,
+        play: false,
         duration: dados.duration,
+        downloaded: false,
         })
       }
     }catch(e){
@@ -67,10 +74,10 @@ export default function Home() {
       setLoad(false);
     }
     console.log(newDownload+"\n"+downloads)
-    setDownloads([newDownload, ...downloads]);
+    // setDownloads([newDownload, ...downloads]);
   }
 
-  const downloadMusic = async () => {
+  const downloadMusic = async (url:string, title?: string) => {
     if(Platform.OS=="web"){
       try {
         const response = await fetch(API[1]+""+encodeURIComponent(url));
@@ -84,7 +91,7 @@ export default function Home() {
     
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = newDownload.artist || "musica.mp3"; // nome do arquivo salvo
+        link.download = title || "musica.mp3"; // nome do arquivo salvo
         document.body.appendChild(link);
         link.click(); // dispara o download
         document.body.removeChild(link);
@@ -121,101 +128,334 @@ export default function Home() {
       
 
     if (newDownload.id != "") {
-      setDownloads((prev) => [newDownload, ...prev]);
+      setDownloads((prev) => {
+        const Downloads = [newDownload, ...prev];
+
+
+        if(Downloads.length > 5) {
+            return Downloads.slice(0,5);
+        }
+
+        return Downloads;
+        
+
+    });
     }
   }, [newDownload])
 
-  const deleteDownload = (id: string) => {
+
+  const deleteDownload = async (id: string) => {
     setDownloads(downloads.filter((d) => d.id !== id))
+    if(sound){
+        await sound.stopAsync();
+    }
+  }
+
+  const playSound = async (url: string, id: string) => {
+        stopSound();
+        setDownloads((prev) =>
+            prev.map((item) =>
+            item.id === id ? { ...item, load: true } : item
+            )
+        );
+        const { sound } = await Audio.Sound.createAsync({
+          uri: API[1]+""+url,
+        });
+        setSound(sound);
+        
+        await sound.playAsync();
+        sound.setOnPlaybackStatusUpdate((status) => {
+            if (!status.isLoaded) {
+                return;
+            }else{
+                setDownloads((prev) =>
+                    prev.map((item) =>
+                    item.id === id ? { ...item, load: false } : item
+                    )
+                );
+            }
+          
+            if (status.isPlaying) {
+              setDownloads((prev) =>
+                prev.map((item) =>
+                item.id === id ? { ...item, play: true } : item
+                )
+            );
+            } else {
+                setDownloads((prev) =>
+                    prev.map((item) =>
+                    item.id === id ? { ...item, play: false } : item
+                    )
+                );
+            }
+          });
+  }
+
+  const stopSound = async (url?: string, id?: string)=> {
+    if (sound) {
+        await sound.stopAsync();
+    } 
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-gradient-to-b from-red-500 to-red-700 text-white">
-      <div className="sticky top-0 z-10 bg-black/80 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Youtube className="h-8 w-8 text-red-500" />
-            <h1 className="text-2xl font-bold">YouTube Music Downloader</h1>
-          </div>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View style={styles.headerInner}>
+          <View style={styles.titleRow}>
+            <Image style={{width:40, height:40}} source={require("../assets/images/icon.png")}/>
+            <Text style={styles.headerTitle}>YouTube Music Downloader</Text>
+          </View>
 
-          <form onSubmit={(e) => e.preventDefault()} className="flex gap-2">
+          <View style={styles.form}>
             <TextInput
               placeholder="Paste YouTube link here"
               value={url}
               onChangeText={setUrl}
-              className="p-4 flex-1 bg-white/10 border-white/20 text-white placeholder:text-white/50"
+              placeholderTextColor="#ffffff80"
+              style={styles.input}
             />
-            <Button onPress={handleSubmit} className="bg-red-600 hover:bg-red-700">
-              <Search className="h-5 w-5 mr-1" />
-              <span className="sr-only sm:not-sr-only">Search</span>
-            </Button>
-          </form>
-        </div>
-      </div>
-      {load && <ActivityIndicator className="mt-[30px]" color='#FAFAFA' />}
-      <div className="container mx-auto px-4 py-4 flex-1">
-        <div className="bg-black/40 rounded-xl p-4 mb-4">
-          <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
-            <Music className="h-5 w-5" /> Your Music
-          </h2>
-          <Separator className="bg-white/20 mb-4" />
+            <Pressable onPress={handleSubmit} style={styles.searchPressable}>
+              <Feather name="search" size={24} color="white" />
+              <Text style={styles.PressableText}>Search</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
 
-          <ScrollArea className="h-[calc(100vh-200px)]">
+      {load && <ActivityIndicator style={{ marginTop: 30 }} color="#FAFAFA" />}
+
+      <View style={styles.content}>
+        <View style={styles.musicBox}>
+          <Text style={styles.sectionTitle}>
+            <Feather name="music" size={24} color="white" /> Your Music
+          </Text>
+          <View style={styles.separator} />
+
+          <ScrollView style={{ maxHeight: height - 200 }}>
             {downloads.length === 0 ? (
-              <div className="text-center py-8 text-white/70">
+              <Text style={styles.emptyText}>
                 No downloads yet. Paste a YouTube link above to get started.
-              </div>
+              </Text>
             ) : (
-              <div className="space-y-4">
+              <View style={{ gap: 16 }}>
                 {downloads.map((download) => (
-                  <div key={download.id} className="bg-white/10 rounded-lg p-3">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={download.thumbnail}
-                        alt={download.title}
-                        className="w-12 h-12 rounded object-cover"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium truncate">{download.title}</h3>
-                        <p className="text-sm text-white/70 truncate">{download.artist}</p>
-                        {!download.downloaded && (
-                          <div className="mt-1">
-                            <Progress value={download.progress} className="h-1.5 bg-white/20" />
-                            <p className="text-xs mt-1 text-white/70">{download.progress}% complete</p>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-2">
-                          <Button size="icon" onPress={downloadMusic} variant="ghost" className="h-8 w-8">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-red-300 hover:text-red-100 hover:bg-red-500/20"
-                          onPress={() => deleteDownload(download.id)}
-                        >
-                          <Trash className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                    {download.downloaded && (
-                      <div className="flex justify-between items-center mt-2 text-xs text-white/70">
-                        <span>Downloaded • {download.duration}</span>
-                        <span>Tap to play</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </div>
-      </div>
+                  <View key={download.id} style={styles.downloadItem}>
+                    <View style={styles.downloadRow}>
+                      <View style={{overflow: 'hidden', borderRadius: 10}}>
+                            <ImageBackground
+                            source={{ uri: download.thumbnail }}
+                            style={styles.thumbnail}
+                            >
+                            {download.load && <View style={{flex: 1, backgroundColor: 'rgba(5,5,5,0.6)', position: 'relative', zIndex: 2, borderRadius: 10}}>
+                                <ActivityIndicator style={{position: 'absolute', top: 12, left: 13}} color="white"/>
+                            </View>}
+                            </ImageBackground>
+                      </View>
+                      {
 
-      <footer className="bg-black/80 py-3 px-4 text-center text-sm text-white/70">
-        <p>This is a UI demo. Actual YouTube downloading may be subject to terms of service.</p>
-      </footer>
-    </main>
-  )
-}
+                      }
+                      <View style={styles.downloadText}>
+                        <Text style={styles.title}>{download.title}</Text>
+                        <Text style={styles.artist}>{download.artist}</Text>
+                        {!download.downloaded && (
+                          <View style={{paddingTop: 15}}>
+                              {!download.play && <Pressable onPress={() => playSound(download.url, download.id)}>
+                                  <Feather name="play" size={24} color="white" />
+                              </Pressable>}
+                              {download.play && <Pressable onPress={() => stopSound(download.url, download.id)}>
+                              <Feather name="pause" size={24} color="white" />
+                            </Pressable>}
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.actionPressables}>
+                        <Pressable onPress={() => downloadMusic(download.url, download.title)} style={styles.iconPressable}>
+                          <Feather name="download" size={24} color="white" />
+                        </Pressable>
+                        <Pressable
+                          onPress={() => deleteDownload(download.id)}
+                          style={[styles.iconPressable, styles.trashPressable]}
+                        >
+                          <Feather name="trash-2" size={24} color="white" />
+                        </Pressable>
+                      </View>
+                    </View>
+                    {download.downloaded && (
+                      <View style={styles.downloadFooter}>
+                        <Text style={styles.downloadFooterText}>Downloaded • {download.duration}</Text>
+                        <Text style={styles.downloadFooterText}>Tap to play</Text>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.footerText}>
+          Enjoy our App.
+        </Text>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    flexDirection: 'column',
+    backgroundColor: 'linear-gradient(to bottom, rgb(224, 27, 73), rgb(182, 12, 12))', 
+  },
+  header: {
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    width: '100%'
+  },
+  headerInner: {
+    paddingTop:15,
+    marginHorizontal: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%'
+  },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    gap: 8,
+    marginBottom: 16,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  form: {
+    flexDirection: 'row',
+    gap: 8,
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  input: {
+    flex: 1,
+    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    color: 'white',
+    borderRadius: 4,
+  },
+  searchPressable: {
+    backgroundColor: '#DC2626',
+    padding: 10,
+    borderRadius: 4,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  PressableText: {
+    color: 'white',
+    marginLeft: 4,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  musicBox: {
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+    color: 'white',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  separator: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginBottom: 16,
+  },
+  emptyText: {
+    textAlign: 'center',
+    paddingVertical: 32,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  downloadItem: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  downloadRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  thumbnail: {
+    width: 48,
+    height: 48,
+    borderRadius: 4,
+    zIndex: 0
+  },
+  downloadText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  title: {
+    fontWeight: '500',
+    color: 'white',
+  },
+  artist: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  progressText: {
+    fontSize: 10,
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  actionPressables: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  iconPressable: {
+    height: 32,
+    width: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trashPressable: {
+    // backgroundColor: 'rgba(255,0,0,0.1)',
+  },
+  downloadFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  downloadFooterText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  footer: {
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  footerText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+  },
+});
