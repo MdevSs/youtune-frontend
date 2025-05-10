@@ -1,16 +1,13 @@
-
 "use client"
-
-import type React from "react"
-import * as FileSystem from 'expo-file-system';
-import { useState, useEffect } from "react"
 import Feather from '@expo/vector-icons/Feather';
-import { Separator } from "@/components/separator";
-import { GestureResponderEvent, Platform, StyleSheet, TextInput, View, Text, ImageBackground, Dimensions, Pressable, Image } from "react-native";
-import { ActivityIndicator, ScrollView } from "react-native";
-import { Audio, AVPlaybackStatus } from 'expo-av';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
+import type React from "react";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Dimensions, GestureResponderEvent, Image, ImageBackground, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import Toast from 'react-native-simple-toast';
 
 
 interface download {
@@ -24,13 +21,14 @@ interface download {
   duration: string;
     downloaded: boolean;
 }
-const API=["https://youtune-backend.flyra.tech/download/music-info?url=", "https://youtune-backend.flyra.tech/download/music?url="];
-// const API=["http://localhost:3000/download/music-info?url=", "http://localhost:3000/download/music?url="];
+// const API=["https://youtune-backend.flyra.tech/download/music-info?url=", "https://youtune-backend.flyra.tech/download/music?url="];
+const API=["http://192.168.15.157:3000/download/music-info?url=", "http://192.168.15.157:3000/download/music?url="];
 export default function Home() {
     const { height } = Dimensions.get('window');
     const [firstRender, setFirstRender] = useState(true);
     const [sound, setSound] = useState<Audio.Sound | null>(null);
     const [load, setLoad] = useState(false);
+    const [downloadLoad, setDownloadLoad] = useState(false);
     const [url, setUrl] = useState("")
     const [newDownload, setNewDownload] = useState<download>({
         url: "",
@@ -77,10 +75,12 @@ export default function Home() {
     // setDownloads([newDownload, ...downloads]);
   }
 
-  const downloadMusic = async (url:string, title?: string) => {
+  const downloadMusic = async (url:string, title: string) => {
+    setDownloadLoad(true);
+    console.log(title)
     if(Platform.OS=="web"){
       try {
-        const response = await fetch(API[1]+""+encodeURIComponent(url));
+        const response = await fetch(API[1]+""+url);
     
         if (!response.ok) {
           throw new Error('Erro ao baixar o arquivo');
@@ -96,26 +96,54 @@ export default function Home() {
         link.click(); // dispara o download
         document.body.removeChild(link);
         URL.revokeObjectURL(blobUrl); // libera memória
+        setDownloadLoad(false);
+        Toast.showWithGravity(
+          'Música baixada com sucesso',
+          Toast.LONG,
+          Toast.TOP,
+        );
       } catch (error) {
         console.error('Erro no download:', error);
       }
     } else {  
-      try{
-          
-          
-          const fileUri = FileSystem.documentDirectory + newDownload.title;
-
-          const downloadRes = await FileSystem.downloadAsync(
-            API[1]+''+encodeURIComponent(url),
-            fileUri
-          );
-
-          console.log('Arquivo baixado em:', downloadRes.uri);
-        }catch(e) {
-            console.error(e)
-        }finally{
-            console.log('Finalizou a requisição');
+      try {
+        // Solicita permissão para acessar a galeria
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status !== 'granted') {
+          console.error('Permissão negada para acessar a galeria.');
+          return;
         }
+
+        // Define onde o arquivo será salvo primeiro (pasta privada do app)
+        const fileUri = FileSystem.documentDirectory + title + ".mp3";
+
+        // Faz o download do arquivo
+        const downloadResult = await FileSystem.downloadAsync(
+          API[1]+""+url, 
+          fileUri);
+
+        if (downloadResult.status !== 200) {
+          throw new Error('Falha no download');
+        }
+
+        
+        const asset = await MediaLibrary.createAssetAsync(downloadResult.uri).then(() => Toast.show(
+          'Música baixada com sucesso',
+          Toast.SHORT,
+        ));
+        await Sharing.shareAsync(fileUri);
+
+        // (Opcional) Salva em um álbum chamado "Downloads"
+        // await MediaLibrary.createAlbumAsync("Downloads", asset, false);
+
+        console.log('Arquivo saaslvo com sucesso na galeria!');
+        setDownloadLoad(false);
+        
+      } catch (error) {
+        console.error('Erro ao baixar e salvar o arquivo:', error);
+      }finally{
+        console.log('Finalizou a requisição');
+      }
     }
   }
 
@@ -230,7 +258,22 @@ export default function Home() {
             <Feather name="music" size={24} color="white" /> Your Music
           </Text>
           <View style={styles.separator} />
-
+          <Modal
+              animationType="slide"
+              backdropColor={"rgba(16, 16, 16, 0.09)"}
+              visible={downloadLoad}
+              onRequestClose={() => {
+                setDownloadLoad(!downloadLoad);
+              }}
+              style={{backgroundColor: "rgb(18, 18, 18)", padding: '200px'}}
+          >
+              <View style={{flex: 1, alignItems:'center', justifyContent: 'center',}}>
+                <View style={{ backgroundColor: 'rgb(29, 27, 27)', width: 150, height: 150, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: 10, borderRadius: 20}}>
+                  <ActivityIndicator color="#FAFAFA"/>
+                  <Text style={{color:"#FAFAFA"}}>Baixando</Text>
+                </View>
+              </View>
+          </Modal>
           <ScrollView style={{ maxHeight: height - 200 }}>
             {downloads.length === 0 ? (
               <Text style={styles.emptyText}>
